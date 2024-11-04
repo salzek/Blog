@@ -1,0 +1,11 @@
+Base64 ile encode edilmiş dosya yolunu belirtin
+$encodedDosyaYolu = "C:\dosya\yolu\ornek_encoded.txt"
+
+Base64 dosyasının içeriğini oku
+$base64Icerik = Get-Content -Path $encodedDosyaYolu -Raw
+
+Base64'ü decode et ve metin olarak dönüştür
+$decodedIcerik = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($base64Icerik))
+
+Decode edilmiş içeriği çalıştırmak için
+Invoke-Expression $decodedIcerik
