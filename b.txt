@@ -45,3 +45,41 @@ echo "$groupDN -> $($memberOfGroups -join ', ')"
 $domainUsersDN = (Get-ADGroup -Identity $groupName).DistinguishedName
 
 Get-GroupMembership -groupDN $domainUsersDN
+
+
+Function Get-DomainTrustMapping {
+    param(
+        [string]$Domain = (Get-ADDomain).DNSRoot,
+        [hashtable]$VisitedDomains = @{},
+        [int]$Level = 0
+    )
+
+    # Daha önce ziyaret edilen domain'leri kontrol edin
+    if ($VisitedDomains.ContainsKey($Domain)) {
+        return
+    }
+
+    $VisitedDomains[$Domain] = $true
+
+    # Hiyerarşik görünüm için girinti ekleyin
+    $indent = " " * $Level
+    Write-Output "$indent$Domain"
+
+    try {
+        # Domain trust'larını alın
+        $Trusts = Get-ADTrust -Server $Domain -Filter *
+    } catch {
+        Write-Error "Domain $Domain erişilemedi."
+        return
+    }
+
+    foreach ($Trust in $Trusts) {
+        $TrustingDomain = $Trust.TargetName
+        # Rekürsif olarak fonksiyonu çağırın
+        Get-DomainTrustMapping -Domain $TrustingDomain -VisitedDomains $VisitedDomains -Level ($Level + 2)
+    }
+}
+
+# Fonksiyonu çalıştırın
+Get-DomainTrustMapping
+
