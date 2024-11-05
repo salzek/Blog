@@ -1,0 +1,47 @@
+# Kontrol etmek istediğiniz grubun adı
+$groupName = "Domain Users"
+
+# Grup üyeliklerini tutacak bir hash table
+$allGroupsHT = @{}
+
+# Hiyerarşik gösterimi tutacak bir liste
+$hierarchy = @()
+
+function Get-GroupMembership {
+    param(
+        [string]$groupDN,
+        [string]$parentGroup = ""
+    )
+
+    # Grubun üye olduğu diğer grupları al
+    $memberOfGroups = Get-ADGroup -Identity $groupDN -Properties MemberOf | Select-Object -ExpandProperty MemberOf
+echo "$groupDN -> $($memberOfGroups -join ', ')" 
+
+   echo "$groupDN -> $($memberOfGroups -join ', ')" -split ', ' | ForEach-Object {
+    if ($_ -match 'CN=([^,]+)') {
+        Write-Host $matches[1]
+    }
+}
+
+
+    # Eğer grup üyesi başka gruplar varsa
+    if ($memberOfGroups) {
+        foreach ($group in $memberOfGroups) {
+            # Eğer grup daha önce listede yoksa
+            if (-not $allGroupsHT.ContainsKey($group)) {
+                $allGroupsHT[$group] = $true # Grubu cache'e ekle
+
+                # Hiyerarşik gösterimi oluştur
+                $hierarchy += if ($parentGroup -ne "") { "$parentGroup → $group" } else { $group }
+
+                # Rekürsif olarak bu grubun üyeliklerini bul
+                Get-GroupMembership -groupDN $group -parentGroup $groupDN
+            }
+        }
+    }
+}
+
+# "Domain Users" grubunun DN'sini al
+$domainUsersDN = (Get-ADGroup -Identity $groupName).DistinguishedName
+
+Get-GroupMembership -groupDN $domainUsersDN
